@@ -1,4 +1,7 @@
 <div align="center">
+⚡ AWECode — AI-powered code editor that can analyze, fix, and secure your code in real time.
+
+🚀 Not just an editor — a full development environment in the browser.
 
 # ⚡ AWECode
 
