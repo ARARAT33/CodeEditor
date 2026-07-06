@@ -4,6 +4,7 @@
 import { lintCode } from '@/lib/awecode/linter'
 import { scanVulnerabilities } from '@/lib/awecode/vulnerabilities'
 import { detectLanguageByFilename } from '@/lib/awecode/languages'
+import { createRequestContext, apiSuccess, apiError } from '@/lib/awecode/api-helpers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -14,13 +15,13 @@ interface FolderScanRequest {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const startTime = Date.now()
+  const ctx = createRequestContext()
   try {
     const body: FolderScanRequest = await req.json()
     const { files, mode } = body
 
     if (!files || !Array.isArray(files)) {
-      return Response.json({ ok: false, error: 'Missing files array' }, { status: 400 })
+      return apiError('Missing files array', 400, ctx)
     }
 
     const results = files.map(file => {
@@ -59,25 +60,21 @@ export async function POST(req: Request): Promise<Response> {
     score -= totalLow * 1
     score = Math.max(0, Math.min(100, score))
 
-    return Response.json({
-      ok: true,
-      data: {
-        filesScanned: files.length,
-        results,
-        summary: {
-          totalErrors,
-          totalWarnings,
-          totalCritical,
-          totalHigh,
-          totalMedium,
-          totalLow,
-          totalVulnerabilities: allVulns,
-          securityScore: Math.round(score * 10) / 10,
-        },
+    return apiSuccess({
+      filesScanned: files.length,
+      results,
+      summary: {
+        totalErrors,
+        totalWarnings,
+        totalCritical,
+        totalHigh,
+        totalMedium,
+        totalLow,
+        totalVulnerabilities: allVulns,
+        securityScore: Math.round(score * 10) / 10,
       },
-      meta: { durationMs: Date.now() - startTime },
-    })
+    }, ctx)
   } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message }, { status: 500 })
+    return apiError(e?.message || 'Folder scan failed', 500, ctx)
   }
 }

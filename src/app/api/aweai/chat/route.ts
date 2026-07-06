@@ -7,6 +7,8 @@ import { scanVulnerabilities } from '@/lib/awecode/vulnerabilities'
 import { refactorCode, correctCode } from '@/lib/awecode/refactor'
 import { detectLanguageByFilename } from '@/lib/awecode/languages'
 import { searchFunctions } from '@/lib/awecode/functions'
+import { createRequestContext, apiSuccess, apiError } from '@/lib/awecode/api-helpers'
+import { chatCompletion, type AIProvider } from '@/lib/awecode/ai-providers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -162,85 +164,29 @@ function stripToolCalls(content: string): string {
   return content.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim()
 }
 
-// ---------- Provider implementations ----------
-
-async function callZAI(messages: ChatMessage[]): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default
-  const zai = await ZAI.create()
-  const completion = await zai.chat.completions.create({
-    messages: messages.map(m => ({ role: m.role as any, content: m.content })),
-    thinking: { type: 'disabled' },
-  })
-  return completion.choices[0]?.message?.content || ''
-}
-
-async function callOpenAI(messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `OpenAI API error: ${res.status}`)
-  }
-  const data = await res.json()
-  return data.choices[0]?.message?.content || ''
-}
-
-async function callAnthropic(messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
-  const system = messages.find(m => m.role === 'system')?.content || ''
-  const userMessages = messages.filter(m => m.role !== 'system').map(m => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: m.content,
-  }))
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      system,
-      messages: userMessages,
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Anthropic API error: ${res.status}`)
-  }
-  const data = await res.json()
-  return data.content?.[0]?.text || ''
-}
-
 // ---------- Main POST handler ----------
 
 export async function POST(req: Request): Promise<Response> {
-  const startTime = Date.now()
-  const requestId = crypto.randomUUID()
+  const ctx = createRequestContext()
 
   let body: ChatRequest
   try {
     body = await req.json()
   } catch {
-    return Response.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
+    return apiError('Invalid JSON body', 400, ctx)
   }
 
   const { messages, provider = 'z-ai', apiKey, model, context } = body
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return Response.json({ ok: false, error: 'Missing messages' }, { status: 400 })
+    return apiError('Missing messages', 400, ctx)
   }
+
+  if ((provider === 'openai' || provider === 'anthropic') && !apiKey) {
+    return apiError(`${provider === 'openai' ? 'OpenAI' : 'Anthropic'} API key required`, 400, ctx)
+  }
+
+  const defaultModel = provider === 'openai' ? 'gpt-4o-mini' : 'claude-3-5-haiku-20241022'
 
   try {
     const contextPrefix = context?.code
@@ -257,16 +203,7 @@ export async function POST(req: Request): Promise<Response> {
     const toolResults: Array<{ tool: string; result: any }> = []
 
     while (rounds < 3) {
-      let response: string
-      if (provider === 'openai') {
-        if (!apiKey) return Response.json({ ok: false, error: 'OpenAI API key required' }, { status: 400 })
-        response = await callOpenAI(fullMessages, apiKey, model || 'gpt-4o-mini')
-      } else if (provider === 'anthropic') {
-        if (!apiKey) return Response.json({ ok: false, error: 'Anthropic API key required' }, { status: 400 })
-        response = await callAnthropic(fullMessages, apiKey, model || 'claude-3-5-haiku-20241022')
-      } else {
-        response = await callZAI(fullMessages)
-      }
+      const response = await chatCompletion(provider as AIProvider, fullMessages, { apiKey, model: model || defaultModel })
 
       lastResponse = response
       const calls = parseToolCalls(response)
@@ -296,25 +233,12 @@ export async function POST(req: Request): Promise<Response> {
 
     const cleanResponse = stripToolCalls(lastResponse)
 
-    return Response.json({
-      ok: true,
-      data: {
-        content: cleanResponse,
-        toolResults,
-        rounds,
-      },
-      meta: {
-        version: '1.0.0',
-        durationMs: Date.now() - startTime,
-        requestId,
-        provider,
-      },
-    })
+    return apiSuccess({
+      content: cleanResponse,
+      toolResults,
+      rounds,
+    }, ctx, { provider })
   } catch (e: any) {
-    return Response.json({
-      ok: false,
-      error: e?.message || 'Chat failed',
-      meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-    }, { status: 500 })
+    return apiError(e?.message || 'Chat failed', 500, ctx)
   }
 }

@@ -1,12 +1,12 @@
 // GET /api/aweai/functions — Browse the function library
 
 import { getAllFunctions, searchFunctions, getFunctionById, getFunctionStats, getFunctionCategories } from '@/lib/awecode/functions'
+import { createRequestContext, apiSuccess, apiError } from '@/lib/awecode/api-helpers'
 
 export const runtime = 'nodejs'
 
 export async function GET(req: Request): Promise<Response> {
-  const startTime = Date.now()
-  const requestId = crypto.randomUUID()
+  const ctx = createRequestContext()
   const url = new URL(req.url)
 
   const id = url.searchParams.get('id')
@@ -16,44 +16,28 @@ export async function GET(req: Request): Promise<Response> {
 
   if (id) {
     const fn = getFunctionById(id)
-    if (!fn) return Response.json({ ok: false, error: 'Function not found' }, { status: 404 })
-    return Response.json({ ok: true, data: fn, meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId } })
+    if (!fn) return apiError('Function not found', 404, ctx)
+    return apiSuccess(fn, ctx)
   }
 
   if (q) {
-    return Response.json({
-      ok: true,
-      data: { query: q, results: searchFunctions(q) },
-      meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-    })
+    return apiSuccess({ query: q, results: searchFunctions(q) }, ctx)
   }
 
   if (url.searchParams.get('categories')) {
-    return Response.json({
-      ok: true,
-      data: { categories: getFunctionCategories() },
-      meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-    })
+    return apiSuccess({ categories: getFunctionCategories() }, ctx)
   }
 
   if (url.searchParams.get('stats')) {
-    return Response.json({
-      ok: true,
-      data: getFunctionStats(),
-      meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-    })
+    return apiSuccess(getFunctionStats(), ctx)
   }
 
   let fns = getAllFunctions()
   if (category) fns = fns.filter(f => f.category === category)
 
-  return Response.json({
-    ok: true,
-    data: {
-      count: fns.length,
-      stats: getFunctionStats(),
-      functions: fns.slice(0, limit),
-    },
-    meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-  })
+  return apiSuccess({
+    count: fns.length,
+    stats: getFunctionStats(),
+    functions: fns.slice(0, limit),
+  }, ctx)
 }
