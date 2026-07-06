@@ -88,7 +88,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       expires_in: data.expires_in,
       interval: data.interval,
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message || 'Server error' }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Server error'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

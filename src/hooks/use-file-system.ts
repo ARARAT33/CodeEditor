@@ -15,6 +15,7 @@ export interface LocalFileNode {
   handle: FileSystemFileHandle | FileSystemDirectoryHandle
   children?: LocalFileNode[]
   expanded?: boolean
+  error?: string
 }
 
 export interface UseFileSystemOptions {
@@ -128,8 +129,10 @@ export function useFileSystem(options: UseFileSystemOptions = {}) {
           })
         }
       }
-    } catch (e) {
-      console.warn('Error reading directory:', path, e)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error'
+      console.warn(`Error reading directory ${path}: ${message}`)
+      node.error = `Failed to read directory: ${message}`
     }
 
     // Sort: folders first, then files, alphabetical
@@ -202,8 +205,9 @@ export function useFileSystem(options: UseFileSystemOptions = {}) {
     try {
       const root = await buildTree(rootHandle, '/', 0)
       setTree(root)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to refresh')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to refresh'
+      setError(message)
     }
     setLoading(false)
   }, [rootHandle, buildTree])
@@ -267,8 +271,9 @@ export function useFileSystem(options: UseFileSystemOptions = {}) {
       setTree({ ...tree! })
 
       return newNode
-    } catch (e) {
-      console.error('Failed to create file:', e)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error'
+      setError(`Failed to create file: ${message}`)
       return null
     }
   }, [tree])
@@ -296,8 +301,9 @@ export function useFileSystem(options: UseFileSystemOptions = {}) {
       })
       setTree({ ...tree! })
       return newNode
-    } catch (e) {
-      console.error('Failed to create folder:', e)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error'
+      setError(`Failed to create folder: ${message}`)
       return null
     }
   }, [tree])

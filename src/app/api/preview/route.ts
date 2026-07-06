@@ -12,7 +12,7 @@ const PREVIEW_DIR = path.join(process.cwd(), '.previews')
 
 // Ensure preview directory exists
 async function ensureDir() {
-  try { await fs.mkdir(PREVIEW_DIR, { recursive: true }) } catch {}
+  await fs.mkdir(PREVIEW_DIR, { recursive: true })
 }
 
 // POST: create a new preview from files
@@ -41,8 +41,9 @@ export async function POST(req: Request): Promise<Response> {
       url: `/api/preview/${previewId}/${entry}`,
       entry,
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Preview creation failed'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }
 
@@ -52,7 +53,11 @@ export async function GET(req: Request): Promise<Response> {
   try {
     const dirs = await fs.readdir(PREVIEW_DIR)
     return Response.json({ ok: true, previews: dirs })
-  } catch {
-    return Response.json({ ok: true, previews: [] })
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Response.json({ ok: true, previews: [] })
+    }
+    const message = e instanceof Error ? e.message : 'Failed to list previews'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

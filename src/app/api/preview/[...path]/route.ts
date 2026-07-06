@@ -75,7 +75,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ path: st
         'X-Content-Type-Options': 'nosniff',
       },
     })
-  } catch {
-    return new Response('File not found', { status: 404 })
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return new Response('File not found', { status: 404 })
+    }
+    if ((e as NodeJS.ErrnoException).code === 'EACCES') {
+      return new Response('Permission denied', { status: 403 })
+    }
+    const message = e instanceof Error ? e.message : 'Failed to read file'
+    return new Response(message, { status: 500 })
   }
 }

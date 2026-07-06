@@ -112,10 +112,13 @@ export function useGitHub() {
       if (reposRes.ok) {
         const r: GitHubRepo[] = await reposRes.json()
         setRepos(r)
+      } else {
+        console.warn(`Failed to fetch repos: ${reposRes.status}`)
       }
       return true
-    } catch (e: any) {
-      setError(e?.message || 'Failed to connect')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to connect'
+      setError(message)
       return false
     } finally {
       setLoading(false)
@@ -140,6 +143,7 @@ export function useGitHub() {
   const listRepos = useCallback(async () => {
     if (!token) return
     setLoading(true)
+    setError(null)
     try {
       const res = await fetch(`${GITHUB_API}/user/repos?sort=updated&per_page=100`, {
         headers: {
@@ -147,9 +151,14 @@ export function useGitHub() {
           Accept: 'application/vnd.github+json',
         },
       })
-      if (res.ok) setRepos(await res.json())
-    } catch (e: any) {
-      setError(e?.message)
+      if (res.ok) {
+        setRepos(await res.json())
+      } else {
+        setError(`Failed to fetch repos: ${res.status}`)
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to list repos'
+      setError(message)
     }
     setLoading(false)
   }, [token])
@@ -183,9 +192,12 @@ export function useGitHub() {
             download_url: null,
           }))
         setFileTree(files)
+      } else {
+        setError(`Failed to fetch file tree: ${res.status}`)
       }
-    } catch (e: any) {
-      setError(e?.message)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to select repo'
+      setError(message)
     }
     setLoading(false)
   }, [token])
@@ -223,9 +235,14 @@ export function useGitHub() {
           },
         }
       )
-      if (res.ok) setCommits(await res.json())
-    } catch (e: any) {
-      setError(e?.message)
+      if (res.ok) {
+        setCommits(await res.json())
+      } else {
+        setError(`Failed to fetch commits: ${res.status}`)
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to fetch commits'
+      setError(message)
     }
     setLoading(false)
   }, [token])
@@ -258,7 +275,10 @@ export function useGitHub() {
           const data = await res.json()
           sha = data.sha
         }
-      } catch {}
+        // 404 is expected for new files — no error needed
+      } catch (e: unknown) {
+        console.warn('Failed to fetch existing file SHA (will create new file):', e instanceof Error ? e.message : e)
+      }
 
       // 2. Update the file via the Contents API (creates a commit automatically)
       const res = await fetch(
@@ -284,8 +304,9 @@ export function useGitHub() {
       }
       setLoading(false)
       return true
-    } catch (e: any) {
-      setError(e?.message)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to commit file'
+      setError(message)
       setLoading(false)
       return false
     }
@@ -332,8 +353,9 @@ export function useGitHub() {
       }
       setLoading(false)
       return true
-    } catch (e: any) {
-      setError(e?.message)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to create branch'
+      setError(message)
       setLoading(false)
       return false
     }

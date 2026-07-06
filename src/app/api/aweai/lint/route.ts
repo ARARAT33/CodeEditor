@@ -25,11 +25,19 @@ export async function POST(req: Request): Promise<Response> {
   if (!lang && filename) lang = detectLanguageByFilename(filename).id
   if (!lang) lang = 'javascript'
 
-  const result = lintCode(code, lang)
+  try {
+    const result = lintCode(code, lang)
 
-  return Response.json({
-    ok: true,
-    data: result,
-    meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
-  })
+    return Response.json({
+      ok: true,
+      data: result,
+      meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId },
+    })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Lint failed'
+    return Response.json(
+      { ok: false, error: message, meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId } },
+      { status: 500 },
+    )
+  }
 }

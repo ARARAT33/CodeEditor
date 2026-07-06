@@ -34,7 +34,12 @@ interface TerminalRequest {
 const WORKSPACE = '/tmp/awecode-workspace'
 
 async function ensureWorkspace() {
-  try { await fs.mkdir(WORKSPACE, { recursive: true }) } catch {}
+  try {
+    await fs.mkdir(WORKSPACE, { recursive: true })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Unknown error'
+    throw new Error(`Failed to create workspace directory: ${message}`)
+  }
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -55,7 +60,12 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // Ensure working directory exists
-    try { await fs.mkdir(workingDir, { recursive: true }) } catch {}
+    try {
+      await fs.mkdir(workingDir, { recursive: true })
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error'
+      return Response.json({ ok: false, error: `Failed to create working directory: ${message}` }, { status: 500 })
+    }
 
     // Check the main command (first word)
     const cmdParts = command.trim().split(/\s+/)
@@ -110,7 +120,8 @@ export async function POST(req: Request): Promise<Response> {
         cwd: workingDir.replace(WORKSPACE, '~'),
       },
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message || 'Server error' }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Server error'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

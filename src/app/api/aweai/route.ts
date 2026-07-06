@@ -59,6 +59,7 @@ export async function GET(req: Request): Promise<Response> {
   const startTime = Date.now()
   const requestId = crypto.randomUUID()
 
+  try {
   const url = new URL(req.url)
   const action = url.searchParams.get('action') || 'capabilities'
 
@@ -137,6 +138,10 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   return makeError(`Unknown action: ${action}`, 400, requestId, startTime)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Request failed'
+    return makeError(message, 500, requestId, startTime)
+  }
 }
 
 // POST /api/aweai — Combined analysis
@@ -166,47 +171,52 @@ export async function POST(req: Request): Promise<Response> {
     lang = 'javascript'
   }
 
-  if (action === 'analyze') {
-    const lint = lintCode(code, lang)
-    const vulns = scanVulnerabilities(code, lang)
-    const refactor = refactorCode(code, lang, false)
-    const corrections = correctCode(code, lang)
+  try {
+    if (action === 'analyze') {
+      const lint = lintCode(code, lang)
+      const vulns = scanVulnerabilities(code, lang)
+      const refactor = refactorCode(code, lang, false)
+      const corrections = correctCode(code, lang)
 
-    return makeResponse({
-      language: lang,
-      lines: code.split('\n').length,
-      characters: code.length,
-      lint,
-      vulnerabilities: vulns,
-      refactoring: refactor,
-      corrections,
-      summary: {
-        errors: lint.stats.errors,
-        warnings: lint.stats.warnings,
-        criticalVulns: vulns.stats.critical,
-        securityScore: vulns.stats.score,
-        refactorOpportunities: refactor.stats.total,
-        autoFixable: corrections.appliedCount,
-      },
-    }, requestId, startTime)
+      return makeResponse({
+        language: lang,
+        lines: code.split('\n').length,
+        characters: code.length,
+        lint,
+        vulnerabilities: vulns,
+        refactoring: refactor,
+        corrections,
+        summary: {
+          errors: lint.stats.errors,
+          warnings: lint.stats.warnings,
+          criticalVulns: vulns.stats.critical,
+          securityScore: vulns.stats.score,
+          refactorOpportunities: refactor.stats.total,
+          autoFixable: corrections.appliedCount,
+        },
+      }, requestId, startTime)
+    }
+
+    if (action === 'lint') {
+      return makeResponse(lintCode(code, lang), requestId, startTime)
+    }
+
+    if (action === 'scan') {
+      return makeResponse(scanVulnerabilities(code, lang), requestId, startTime)
+    }
+
+    if (action === 'refactor') {
+      const apply = body.apply === true
+      return makeResponse(refactorCode(code, lang, apply), requestId, startTime)
+    }
+
+    if (action === 'correct') {
+      return makeResponse(correctCode(code, lang), requestId, startTime)
+    }
+
+    return makeError(`Unknown action: ${action}`, 400, requestId, startTime)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Processing failed'
+    return makeError(message, 500, requestId, startTime)
   }
-
-  if (action === 'lint') {
-    return makeResponse(lintCode(code, lang), requestId, startTime)
-  }
-
-  if (action === 'scan') {
-    return makeResponse(scanVulnerabilities(code, lang), requestId, startTime)
-  }
-
-  if (action === 'refactor') {
-    const apply = body.apply === true
-    return makeResponse(refactorCode(code, lang, apply), requestId, startTime)
-  }
-
-  if (action === 'correct') {
-    return makeResponse(correctCode(code, lang), requestId, startTime)
-  }
-
-  return makeError(`Unknown action: ${action}`, 400, requestId, startTime)
 }

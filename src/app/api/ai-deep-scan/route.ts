@@ -71,10 +71,17 @@ export async function POST(req: Request): Promise<Response> {
       // Parse JSON from response (handle markdown fences)
       const jsonMatch = aiResponse.match(/\[[\s\S]*\]/)
       if (jsonMatch) {
-        aiFindings = JSON.parse(jsonMatch[0])
+        try {
+          aiFindings = JSON.parse(jsonMatch[0])
+        } catch (parseErr: unknown) {
+          const parseMsg = parseErr instanceof Error ? parseErr.message : 'Unknown parse error'
+          aiError = `AI returned invalid JSON: ${parseMsg}`
+        }
+      } else {
+        aiError = 'AI response did not contain a JSON array of findings'
       }
-    } catch (e: any) {
-      aiError = e.message
+    } catch (e: unknown) {
+      aiError = e instanceof Error ? e.message : 'AI scan failed'
     }
 
     // Combine offline + AI findings
@@ -120,8 +127,9 @@ export async function POST(req: Request): Promise<Response> {
       },
       meta: { durationMs: Date.now() - startTime, provider },
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Deep scan failed'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }
 
