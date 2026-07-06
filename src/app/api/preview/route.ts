@@ -30,7 +30,10 @@ export async function POST(req: Request): Promise<Response> {
     await fs.mkdir(previewPath, { recursive: true })
 
     for (const file of files) {
-      const filePath = path.join(previewPath, file.path)
+      const filePath = path.resolve(previewPath, file.path)
+      if (!filePath.startsWith(previewPath)) {
+        return Response.json({ ok: false, error: `Path traversal blocked: ${file.path}` }, { status: 403 })
+      }
       await fs.mkdir(path.dirname(filePath), { recursive: true })
       await fs.writeFile(filePath, file.content, 'utf-8')
     }
