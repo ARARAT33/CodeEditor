@@ -18,7 +18,7 @@ const ALLOWED_COMMANDS = new Set([
   'javac', 'java', 'kotlin', 'kotlinc',
   'deno', 'bun', 'tsx', 'ts-node', 'tsc',
   'sql', 'sqlite3',
-  'date', 'whoami', 'uname', 'env',
+  'date', 'whoami', 'uname',
   'md5sum', 'sha256sum', 'sha1sum', 'base64',
   'jq', 'yq',
   'git', 'npm', 'npx', 'yarn', 'pnpm',
@@ -57,24 +57,37 @@ export async function POST(req: Request): Promise<Response> {
     // Ensure working directory exists
     try { await fs.mkdir(workingDir, { recursive: true }) } catch {}
 
-    // Check the main command (first word)
-    const cmdParts = command.trim().split(/\s+/)
-    const mainCmd = cmdParts[0]
-    if (!ALLOWED_COMMANDS.has(mainCmd)) {
+    // Reject dangerous shell metacharacters that could bypass the allowlist.
+    // Pipes (|) and simple redirects (>, >>) are permitted for convenience;
+    // everything else that could chain or substitute commands is blocked.
+    const DANGEROUS_SHELL_CHARS = /[;`$\\!&{}\[\]\(\)]/
+    if (DANGEROUS_SHELL_CHARS.test(command)) {
       return Response.json({
         ok: false,
-        error: `Command "${mainCmd}" is not allowed. Allowed: ${Array.from(ALLOWED_COMMANDS).sort().join(', ')}`,
+        error: 'Command contains disallowed shell characters. Pipes (|) and redirects (>, >>) are allowed, but ;, `, $, &, etc. are not.',
       }, { status: 403 })
     }
 
-    // Run via shell to support pipes
+    // Validate every command in a pipeline
+    const pipeSegments = command.split('|').map(s => s.trim()).filter(Boolean)
+    for (const segment of pipeSegments) {
+      const segCmd = segment.split(/\s+/)[0]
+      if (!ALLOWED_COMMANDS.has(segCmd)) {
+        return Response.json({
+          ok: false,
+          error: `Command "${segCmd}" is not allowed. Allowed: ${Array.from(ALLOWED_COMMANDS).sort().join(', ')}`,
+        }, { status: 403 })
+      }
+    }
+
+    // Run via shell to support pipes — only pass a minimal, safe environment.
     const child = spawn('sh', ['-c', command], {
       cwd: workingDir,
       env: {
-        ...process.env,
-        PATH: process.env.PATH,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         HOME: workingDir,
         TERM: 'xterm-256color',
+        LANG: 'en_US.UTF-8',
       },
       timeout,
     })
