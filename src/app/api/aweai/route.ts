@@ -11,59 +11,30 @@
 
 import { lintCode, LINT_RULE_COUNT } from '@/lib/awecode/linter'
 import { scanVulnerabilities, VULN_RULE_COUNT } from '@/lib/awecode/vulnerabilities'
-import { refactorCode, correctCode, findRefactorOpportunities } from '@/lib/awecode/refactor'
-import { LANGUAGES, LANGUAGE_COUNT, detectLanguageByFilename, getFunctionStats } from '@/lib/awecode/languages'
-import { getAllFunctions, searchFunctions, getFunctionById } from '@/lib/awecode/functions'
+import { refactorCode, correctCode } from '@/lib/awecode/refactor'
+import { LANGUAGES, LANGUAGE_COUNT } from '@/lib/awecode/languages'
+import { getAllFunctions, searchFunctions, getFunctionById, getFunctionStats } from '@/lib/awecode/functions'
+import {
+  createRequestContext,
+  parseJsonBody,
+  apiSuccess,
+  apiError,
+  resolveLanguage,
+} from '@/lib/awecode/api-helpers'
 
 export const runtime = 'nodejs'
 
-export interface AWEAIResponse<T = any> {
-  ok: boolean
-  data?: T
-  error?: string
-  meta?: {
-    version: string
-    durationMs: number
-    requestId: string
-  }
-}
-
-function makeResponse<T>(data: T, requestId: string, startTime: number): Response {
-  const body: AWEAIResponse<T> = {
-    ok: true,
-    data,
-    meta: {
-      version: '1.0.0',
-      durationMs: Date.now() - startTime,
-      requestId,
-    },
-  }
-  return Response.json(body)
-}
-
-function makeError(message: string, status = 400, requestId: string, startTime: number): Response {
-  const body: AWEAIResponse = {
-    ok: false,
-    error: message,
-    meta: {
-      version: '1.0.0',
-      durationMs: Date.now() - startTime,
-      requestId,
-    },
-  }
-  return Response.json(body, { status })
-}
+export type { AWEAIResponse } from '@/lib/awecode/api-helpers'
 
 // GET /api/aweai — Capabilities / status
 export async function GET(req: Request): Promise<Response> {
-  const startTime = Date.now()
-  const requestId = crypto.randomUUID()
+  const ctx = createRequestContext()
 
   const url = new URL(req.url)
   const action = url.searchParams.get('action') || 'capabilities'
 
   if (action === 'capabilities') {
-    return makeResponse({
+    return apiSuccess({
       name: 'AWEAI',
       version: '1.0.0',
       description: 'AI Agent API for AWECode — provides code analysis, linting, vulnerability scanning, refactoring, and a function library.',
@@ -95,11 +66,11 @@ export async function GET(req: Request): Promise<Response> {
         'owasp-mapping',
         'security-score',
       ],
-    }, requestId, startTime)
+    }, ctx)
   }
 
   if (action === 'languages') {
-    return makeResponse({
+    return apiSuccess({
       count: LANGUAGE_COUNT,
       categories: [...new Set(LANGUAGES.map(l => l.category))],
       languages: LANGUAGES.map(l => ({
@@ -110,61 +81,50 @@ export async function GET(req: Request): Promise<Response> {
         hasLinter: l.hasLinter,
         hasVulnScan: l.hasVulnScan,
       })),
-    }, requestId, startTime)
+    }, ctx)
   }
 
   if (action === 'functions') {
     const q = url.searchParams.get('q')
     if (q) {
-      return makeResponse({
+      return apiSuccess({
         query: q,
         results: searchFunctions(q).slice(0, 50),
-      }, requestId, startTime)
+      }, ctx)
     }
-    return makeResponse({
+    return apiSuccess({
       count: getFunctionStats().total,
       stats: getFunctionStats(),
       functions: getAllFunctions().slice(0, 100),
-    }, requestId, startTime)
+    }, ctx)
   }
 
   if (action === 'function') {
     const id = url.searchParams.get('id')
-    if (!id) return makeError('Missing "id" parameter', 400, requestId, startTime)
+    if (!id) return apiError('Missing "id" parameter', 400, ctx)
     const fn = getFunctionById(id)
-    if (!fn) return makeError(`Function with id "${id}" not found`, 404, requestId, startTime)
-    return makeResponse(fn, requestId, startTime)
+    if (!fn) return apiError(`Function with id "${id}" not found`, 404, ctx)
+    return apiSuccess(fn, ctx)
   }
 
-  return makeError(`Unknown action: ${action}`, 400, requestId, startTime)
+  return apiError(`Unknown action: ${action}`, 400, ctx)
 }
 
 // POST /api/aweai — Combined analysis
 export async function POST(req: Request): Promise<Response> {
-  const startTime = Date.now()
-  const requestId = crypto.randomUUID()
+  const ctx = createRequestContext()
 
-  let body: any
-  try {
-    body = await req.json()
-  } catch {
-    return makeError('Invalid JSON body', 400, requestId, startTime)
-  }
+  const parsed = await parseJsonBody(req, ctx)
+  if ('error' in parsed) return parsed.error
+  const body = parsed.body
 
   const { code, language, filename, action = 'analyze' } = body
 
   if (!code || typeof code !== 'string') {
-    return makeError('Missing "code" field', 400, requestId, startTime)
+    return apiError('Missing "code" field', 400, ctx)
   }
 
-  // Determine language
-  let lang = language
-  if (!lang && filename) {
-    lang = detectLanguageByFilename(filename).id
-  }
-  if (!lang) {
-    lang = 'javascript'
-  }
+  const lang = resolveLanguage(language, filename)
 
   if (action === 'analyze') {
     const lint = lintCode(code, lang)
@@ -172,7 +132,7 @@ export async function POST(req: Request): Promise<Response> {
     const refactor = refactorCode(code, lang, false)
     const corrections = correctCode(code, lang)
 
-    return makeResponse({
+    return apiSuccess({
       language: lang,
       lines: code.split('\n').length,
       characters: code.length,
@@ -188,25 +148,25 @@ export async function POST(req: Request): Promise<Response> {
         refactorOpportunities: refactor.stats.total,
         autoFixable: corrections.appliedCount,
       },
-    }, requestId, startTime)
+    }, ctx)
   }
 
   if (action === 'lint') {
-    return makeResponse(lintCode(code, lang), requestId, startTime)
+    return apiSuccess(lintCode(code, lang), ctx)
   }
 
   if (action === 'scan') {
-    return makeResponse(scanVulnerabilities(code, lang), requestId, startTime)
+    return apiSuccess(scanVulnerabilities(code, lang), ctx)
   }
 
   if (action === 'refactor') {
     const apply = body.apply === true
-    return makeResponse(refactorCode(code, lang, apply), requestId, startTime)
+    return apiSuccess(refactorCode(code, lang, apply), ctx)
   }
 
   if (action === 'correct') {
-    return makeResponse(correctCode(code, lang), requestId, startTime)
+    return apiSuccess(correctCode(code, lang), ctx)
   }
 
-  return makeError(`Unknown action: ${action}`, 400, requestId, startTime)
+  return apiError(`Unknown action: ${action}`, 400, ctx)
 }

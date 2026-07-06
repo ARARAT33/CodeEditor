@@ -3,10 +3,21 @@
 // POST /api/ai-deep-scan
 
 import { scanVulnerabilities } from '@/lib/awecode/vulnerabilities'
-import { detectLanguageByFilename } from '@/lib/awecode/languages'
+import { createRequestContext, apiSuccess, apiError, resolveLanguage } from '@/lib/awecode/api-helpers'
+import { chatCompletion, type AIProvider } from '@/lib/awecode/ai-providers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
+
+function buildScanMessages(code: string, lang: string, filename?: string) {
+  return [
+    { role: 'system' as const, content: SYSTEM_PROMPT },
+    {
+      role: 'user' as const,
+      content: `Analyze this ${lang} code from ${filename} for security vulnerabilities:\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nReturn ONLY a JSON array of findings.`,
+    },
+  ]
+}
 
 const SYSTEM_PROMPT = `You are a world-class security auditor. The user provides code and you must find ALL security vulnerabilities — including subtle ones that simple regex scanners miss.
 
@@ -41,15 +52,15 @@ Only return real issues — do not invent false positives. If unsure, mark confi
 Output ONLY a JSON array, no other text. No markdown fences.`
 
 export async function POST(req: Request): Promise<Response> {
-  const startTime = Date.now()
+  const ctx = createRequestContext()
   try {
     const body = await req.json()
     const { code, language, filename, provider = 'z-ai', apiKey, model } = body
 
-    if (!code) return Response.json({ ok: false, error: 'Missing code' }, { status: 400 })
+    if (!code) return apiError('Missing code', 400, ctx)
 
     // First, run the offline regex scan
-    const lang = language || (filename ? detectLanguageByFilename(filename).id : 'javascript')
+    const lang = resolveLanguage(language, filename)
     const offlineScan = scanVulnerabilities(code, lang)
 
     // Then, run the AI deep scan
@@ -57,16 +68,7 @@ export async function POST(req: Request): Promise<Response> {
     let aiError: string | null = null
 
     try {
-      let aiResponse: string
-      if (provider === 'openai') {
-        if (!apiKey) throw new Error('OpenAI API key required')
-        aiResponse = await callOpenAI(code, lang, filename, apiKey, model || 'gpt-4o-mini')
-      } else if (provider === 'anthropic') {
-        if (!apiKey) throw new Error('Anthropic API key required')
-        aiResponse = await callAnthropic(code, lang, filename, apiKey, model || 'claude-3-5-sonnet-20241022')
-      } else {
-        aiResponse = await callZAI(code, lang, filename)
-      }
+      const aiResponse = await chatCompletion(provider as AIProvider, buildScanMessages(code, lang, filename), { apiKey, model })
 
       // Parse JSON from response (handle markdown fences)
       const jsonMatch = aiResponse.match(/\[[\s\S]*\]/)
@@ -101,85 +103,22 @@ export async function POST(req: Request): Promise<Response> {
     const sevOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
     combined.sort((a: any, b: any) => (sevOrder[a.severity as keyof typeof sevOrder] ?? 5) - (sevOrder[b.severity as keyof typeof sevOrder] ?? 5) || (a.line || 0) - (b.line || 0))
 
-    return Response.json({
-      ok: true,
-      data: {
-        offlineStats: offlineScan.stats,
-        aiFindingsCount: aiFindings.length,
-        aiError,
-        combined,
-        summary: {
-          totalFindings: combined.length,
-          critical: combined.filter((f: any) => f.severity === 'critical').length,
-          high: combined.filter((f: any) => f.severity === 'high').length,
-          medium: combined.filter((f: any) => f.severity === 'medium').length,
-          low: combined.filter((f: any) => f.severity === 'low').length,
-          offlineOnly: offlineScan.stats.total,
-          aiOnly: aiFindings.length,
-        },
+    return apiSuccess({
+      offlineStats: offlineScan.stats,
+      aiFindingsCount: aiFindings.length,
+      aiError,
+      combined,
+      summary: {
+        totalFindings: combined.length,
+        critical: combined.filter((f: any) => f.severity === 'critical').length,
+        high: combined.filter((f: any) => f.severity === 'high').length,
+        medium: combined.filter((f: any) => f.severity === 'medium').length,
+        low: combined.filter((f: any) => f.severity === 'low').length,
+        offlineOnly: offlineScan.stats.total,
+        aiOnly: aiFindings.length,
       },
-      meta: { durationMs: Date.now() - startTime, provider },
-    })
+    }, ctx, { provider })
   } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message }, { status: 500 })
+    return apiError(e?.message || 'Deep scan failed', 500, ctx)
   }
-}
-
-async function callZAI(code: string, lang: string, filename: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default
-  const zai = await ZAI.create()
-  const completion = await zai.chat.completions.create({
-    messages: [
-      { role: 'assistant', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Analyze this ${lang} code from ${filename} for security vulnerabilities:\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nReturn ONLY a JSON array of findings.` },
-    ],
-    thinking: { type: 'disabled' },
-  })
-  return completion.choices[0]?.message?.content || '[]'
-}
-
-async function callOpenAI(code: string, lang: string, filename: string, apiKey: string, model: string): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Analyze this ${lang} code from ${filename} for security vulnerabilities:\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nReturn ONLY a JSON array of findings.` },
-      ],
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `OpenAI error: ${res.status}`)
-  }
-  const data = await res.json()
-  return data.choices[0]?.message?.content || '[]'
-}
-
-async function callAnthropic(code: string, lang: string, filename: string, apiKey: string, model: string): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: `Analyze this ${lang} code from ${filename} for security vulnerabilities:\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nReturn ONLY a JSON array of findings.`,
-      }],
-    }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Anthropic error: ${res.status}`)
-  }
-  const data = await res.json()
-  return data.content?.[0]?.text || '[]'
 }
