@@ -214,19 +214,27 @@ export function GitHubPanel({ onOpenFile, onCloneToFiles }: GitHubPanelProps) {
     try {
       // Fetch the file tree, then fetch each file's content
       const files: Array<{ path: string; content: string }> = []
+      const failedFiles: string[] = []
       for (const file of gh.fileTree.slice(0, 200)) { // limit to 200 files
         try {
           const content = await gh.getFileContent(gh.selectedRepo, file.path)
           files.push({ path: file.path, content })
-        } catch {}
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : 'Unknown error'
+          console.warn(`Failed to fetch ${file.path}: ${errMsg}`)
+          failedFiles.push(file.path)
+        }
       }
       if (files.length === 0) {
-        toast({ title: 'No files to clone', variant: 'destructive' })
+        toast({ title: 'No files to clone', description: failedFiles.length > 0 ? `${failedFiles.length} file(s) failed to fetch` : undefined, variant: 'destructive' })
         setCloning(false)
         return
       }
       onCloneToFiles?.(files, gh.selectedRepo.name)
-      toast({ title: `Cloned ${files.length} files`, description: gh.selectedRepo.full_name })
+      const desc = failedFiles.length > 0
+        ? `${gh.selectedRepo.full_name} (${failedFiles.length} file(s) skipped due to errors)`
+        : gh.selectedRepo.full_name
+      toast({ title: `Cloned ${files.length} files`, description: desc })
     } catch (e: any) {
       toast({ title: 'Clone failed', description: e.message, variant: 'destructive' })
     }

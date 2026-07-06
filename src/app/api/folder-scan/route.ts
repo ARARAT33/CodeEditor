@@ -24,21 +24,33 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const results = files.map(file => {
-      const language = detectLanguageByFilename(file.path).id
-      const lint = lintCode(file.content, language)
-      const vulns = scanVulnerabilities(file.content, language)
-      return {
-        path: file.path,
-        language,
-        lines: file.content.split('\n').length,
-        lint: mode === 'lint' || mode === 'analyze' ? {
-          stats: lint.stats,
-          problems: lint.problems,
-        } : undefined,
-        vulnerabilities: mode === 'scan' || mode === 'analyze' ? {
-          stats: vulns.stats,
-          vulnerabilities: vulns.vulnerabilities,
-        } : undefined,
+      try {
+        const language = detectLanguageByFilename(file.path).id
+        const lint = lintCode(file.content, language)
+        const vulns = scanVulnerabilities(file.content, language)
+        return {
+          path: file.path,
+          language,
+          lines: file.content.split('\n').length,
+          lint: mode === 'lint' || mode === 'analyze' ? {
+            stats: lint.stats,
+            problems: lint.problems,
+          } : undefined,
+          vulnerabilities: mode === 'scan' || mode === 'analyze' ? {
+            stats: vulns.stats,
+            vulnerabilities: vulns.vulnerabilities,
+          } : undefined,
+        }
+      } catch (fileErr: unknown) {
+        const errMsg = fileErr instanceof Error ? fileErr.message : 'Unknown error'
+        return {
+          path: file.path,
+          language: 'unknown',
+          lines: 0,
+          error: `Failed to process file: ${errMsg}`,
+          lint: undefined,
+          vulnerabilities: undefined,
+        }
       }
     })
 
@@ -77,7 +89,8 @@ export async function POST(req: Request): Promise<Response> {
       },
       meta: { durationMs: Date.now() - startTime },
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Folder scan failed'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

@@ -108,7 +108,8 @@ export async function POST(req: Request): Promise<Response> {
         commitSha: newCommit.sha,
       },
     })
-  } catch (e: any) {
-    return Response.json({ ok: false, error: e?.message || 'Failed to create PR' }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Failed to create PR'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

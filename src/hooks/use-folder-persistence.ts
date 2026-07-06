@@ -44,7 +44,8 @@ async function loadHandle(): Promise<FileSystemDirectoryHandle | null> {
       req.onsuccess = () => resolve(req.result || null)
       req.onerror = () => reject(req.error)
     })
-  } catch {
+  } catch (e: unknown) {
+    console.warn('Failed to load folder handle from IndexedDB:', e instanceof Error ? e.message : e)
     return null
   }
 }
@@ -58,7 +59,9 @@ async function clearHandle(): Promise<void> {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-  } catch {}
+  } catch (e: unknown) {
+    console.warn('Failed to clear folder handle from IndexedDB:', e instanceof Error ? e.message : e)
+  }
 }
 
 export interface UseFolderPersistence {

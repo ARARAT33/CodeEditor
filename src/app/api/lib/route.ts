@@ -31,7 +31,11 @@ export async function GET(req: Request): Promise<Response> {
     return new Response(content, {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
     })
-  } catch (e) {
-    return Response.json({ ok: false, error: 'Doc not found' }, { status: 404 })
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Response.json({ ok: false, error: 'Doc not found' }, { status: 404 })
+    }
+    const message = e instanceof Error ? e.message : 'Failed to read documentation'
+    return Response.json({ ok: false, error: message }, { status: 500 })
   }
 }

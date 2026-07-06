@@ -150,8 +150,9 @@ function parseToolCalls(content: string): Array<{ tool: string; args: any; raw: 
     try {
       const parsed = JSON.parse(match[1])
       calls.push({ tool: parsed.tool, args: parsed.args || {}, raw: match[0] })
-    } catch {
-      // Invalid JSON — skip
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : 'Unknown parse error'
+      console.warn(`Skipping malformed tool call JSON: ${errMsg}`, match[1].slice(0, 200))
     }
   }
   return calls

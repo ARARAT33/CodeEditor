@@ -27,34 +27,42 @@ export async function POST(req: Request): Promise<Response> {
   if (!lang && filename) lang = detectLanguageByFilename(filename).id
   if (!lang) lang = 'javascript'
 
-  const lint = lintCode(code, lang)
-  const vulns = scanVulnerabilities(code, lang)
-  const refactor = refactorCode(code, lang, false)
-  const corrections = correctCode(code, lang)
+  try {
+    const lint = lintCode(code, lang)
+    const vulns = scanVulnerabilities(code, lang)
+    const refactor = refactorCode(code, lang, false)
+    const corrections = correctCode(code, lang)
 
-  return Response.json({
-    ok: true,
-    data: {
-      language: lang,
-      lines: code.split('\n').length,
-      characters: code.length,
-      lint,
-      vulnerabilities: vulns,
-      refactoring: refactor,
-      corrections,
-      summary: {
-        errors: lint.stats.errors,
-        warnings: lint.stats.warnings,
-        criticalVulns: vulns.stats.critical,
-        securityScore: vulns.stats.score,
-        refactorOpportunities: refactor.stats.total,
-        autoFixable: corrections.appliedCount,
+    return Response.json({
+      ok: true,
+      data: {
+        language: lang,
+        lines: code.split('\n').length,
+        characters: code.length,
+        lint,
+        vulnerabilities: vulns,
+        refactoring: refactor,
+        corrections,
+        summary: {
+          errors: lint.stats.errors,
+          warnings: lint.stats.warnings,
+          criticalVulns: vulns.stats.critical,
+          securityScore: vulns.stats.score,
+          refactorOpportunities: refactor.stats.total,
+          autoFixable: corrections.appliedCount,
+        },
       },
-    },
-    meta: {
-      version: '1.0.0',
-      durationMs: Date.now() - startTime,
-      requestId,
-    },
-  })
+      meta: {
+        version: '1.0.0',
+        durationMs: Date.now() - startTime,
+        requestId,
+      },
+    })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Analysis failed'
+    return Response.json(
+      { ok: false, error: message, meta: { version: '1.0.0', durationMs: Date.now() - startTime, requestId } },
+      { status: 500 },
+    )
+  }
 }
